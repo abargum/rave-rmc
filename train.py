@@ -16,10 +16,10 @@ except:
     sys.path.append(os.path.abspath('.'))
     import rave
 
-import rave
 import rave.core
 import rave.dataset
 from rave.transforms import get_augmentations, add_augmentation
+import wandb
 
 
 FLAGS = flags.FLAGS
@@ -124,6 +124,17 @@ def add_gin_extension(config_name: str) -> str:
         config_name += '.gin'
     return config_name
 
+def get_wandb_run_id(ckpt_path):
+    if ckpt_path is None:
+        return None
+    folder = ckpt_path if os.path.isdir(ckpt_path) else os.path.dirname(ckpt_path)
+    for candidate in [folder, os.path.join(folder, '..'), os.path.join(folder, '../..')]:
+        id_file = os.path.abspath(os.path.join(candidate, 'wandb_run_id.txt'))
+        if os.path.exists(id_file):
+            with open(id_file) as f:
+                return f.read().strip()
+    return None
+
 def parse_augmentations(augmentations):
     for a in augmentations:
         gin.parse_config_file(a)
@@ -132,6 +143,14 @@ def parse_augmentations(augmentations):
     return get_augmentations()
 
 def main(argv):
+
+    existing_run_id = get_wandb_run_id(FLAGS.ckpt)
+    if existing_run_id:
+        wandb_run = wandb.init(project="rave-rmc", entity="abargum",
+                               name=f"{FLAGS.name}", id=existing_run_id, resume="must")
+    else:
+        wandb_run = wandb.init(project="rave-rmc", entity="abargum", name=f"{FLAGS.name}")
+    
     torch.set_float32_matmul_precision('high')
     torch.backends.cudnn.benchmark = True
 
@@ -168,6 +187,7 @@ def main(argv):
                                        normalize=FLAGS.normalize,
                                        rand_pitch=FLAGS.rand_pitch,
                                        n_channels=n_channels)
+    
     train, val = rave.dataset.split_dataset(dataset, 98)
 
     # get data-loader
@@ -179,6 +199,7 @@ def main(argv):
                        True,
                        drop_last=True,
                        num_workers=num_workers)
+    
     val = DataLoader(val, FLAGS.batch, False, num_workers=num_workers)
 
     # CHECKPOINT CALLBACKS
@@ -204,6 +225,10 @@ def main(argv):
     RUN_NAME = f'{FLAGS.name}_{gin_hash}'
 
     os.makedirs(os.path.join(FLAGS.out_path, RUN_NAME), exist_ok=True)
+
+    if not existing_run_id:
+        with open(os.path.join(FLAGS.out_path, RUN_NAME, 'wandb_run_id.txt'), 'w') as f:
+            f.write(wandb_run.id)
 
     if FLAGS.gpu == [-1]:
         gpu = 0
@@ -240,10 +265,7 @@ def main(argv):
         callbacks.append(EMA(FLAGS.ema))
 
     trainer = pl.Trainer(
-        logger=pl.loggers.TensorBoardLogger(
-            FLAGS.out_path,
-            name=RUN_NAME,
-        ),
+        logger=pl.loggers.WandbLogger(experiment=wandb_run),
         accelerator=accelerator,
         devices=devices,
         callbacks=callbacks,
@@ -266,7 +288,6 @@ def main(argv):
         config_out.write(gin.operative_config_str())
 
     trainer.fit(model, train, val, ckpt_path=run)
-
 
 if __name__ == "__main__": 
     app.run(main)

@@ -2,7 +2,7 @@ import math
 from time import time
 from typing import Callable, Optional, Iterable, Dict
 
-import gin, pdb
+import gin, pdb, wandb, os
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -413,14 +413,13 @@ class RAVE(pl.LightningModule):
             gen_opt.step()
 
         # LOGGING
-        self.log("beta_factor", self.beta_factor)
-
+        metrics = {"beta_factor": self.beta_factor}
+        metrics.update(loss_gen)
         if self.warmed_up:
-            self.log("loss_dis", loss_dis)
-            self.log("pred_real", pred_real.mean())
-            self.log("pred_fake", pred_fake.mean())
-
-        self.log_dict(loss_gen)
+            metrics["loss_dis"] = loss_dis
+            metrics["pred_real"] = pred_real.mean()
+            metrics["pred_fake"] = pred_fake.mean()
+        wandb.log(metrics)
         p.tick('logging')
 
     def validation_step(self, x, batch_idx):
@@ -439,6 +438,7 @@ class RAVE(pl.LightningModule):
 
         if self.trainer is not None:
             self.log('validation', full_distance)
+            wandb.log({"validation": full_distance})
 
         return torch.cat([x, y], -1), mean
 
@@ -481,31 +481,21 @@ class RAVE(pl.LightningModule):
             self.fidelity.copy_(torch.from_numpy(var).to(self.fidelity))
 
             var_percent = [.8, .9, .95, .99]
-            for p in var_percent:
-                self.log(
-                    f"fidelity_{p}",
-                    np.argmax(var > p).astype(np.float32),
-                )
+            wandb.log({f"fidelity_{p}": np.argmax(var > p).astype(float) for p in var_percent})
 
         y = torch.cat(audio, 0)[:8].reshape(-1).numpy()
         if self.integrator is not None:
             y = self.integrator(y)
-        self.logger.experiment.add_audio("audio_val", y, self.eval_number,
-                                        self.sr)
+        self.logger.experiment.log({"audio_val": wandb.Audio(y, sample_rate=self.sr)})
         self.eval_number += 1
 
     def on_fit_start(self):
-        tb = self.logger.experiment
-
-        config = gin.operative_config_str()
-        config = config.split('\n')
-        config = ['```'] + config + ['```']
-        config = '\n'.join(config)
-        tb.add_text("config", config)
-
-        model = str(self)
-        model = model.split('\n')
-        model = ['```'] + model + ['```']
-        model = '\n'.join(model)
-        tb.add_text("model", model)
+        config_path = os.path.join(wandb.run.dir, "gin_config.txt")
+        model_path = os.path.join(wandb.run.dir, "model_architecture.txt")
+        with open(config_path, "w") as f:
+            f.write(gin.operative_config_str())
+        with open(model_path, "w") as f:
+            f.write(str(self))
+        wandb.save(config_path)
+        wandb.save(model_path)
 

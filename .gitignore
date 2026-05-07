@@ -1,6 +1,7 @@
 *pycache*
 *DS_Store
 lightning_logs/
+datasets/
 *.ckpt
 *.ts
 *libtorch*
@@ -10,6 +11,7 @@ runs
 *.npy
 *.yaml
 *.onnx
+wandb/
 __version__*
 PKG-INFO
 .junit-test-report.xml

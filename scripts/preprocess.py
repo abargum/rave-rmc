@@ -218,18 +218,21 @@ def main(argv):
             exit()
 
 
+    input_paths = [os.path.abspath(os.path.expanduser(p)) for p in FLAGS.input_path]
+    output_path = os.path.abspath(os.path.expanduser(FLAGS.output_path))
+
     chunk_load = partial(load_audio_chunk,
                          n_signal=FLAGS.num_signal,
                          sr=FLAGS.sampling_rate,
                          channels=FLAGS.channels)
 
-    output_dir = os.path.join(*os.path.split(FLAGS.output_path)[:-1])
+    output_dir = os.path.join(*os.path.split(output_path)[:-1])
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
     # create database
     env = lmdb.open(
-        FLAGS.output_path,
+        output_path,
         map_size=FLAGS.max_db_size * 1024**3,
         map_async=not FLAGS.dyndb,
         writemap=not FLAGS.dyndb,
@@ -238,12 +241,12 @@ def main(argv):
 
 
     # search for audio files
-    audios = search_for_audios(FLAGS.input_path, FLAGS.ext)
+    audios = search_for_audios(input_paths, FLAGS.ext)
     audios = map(str, audios)
     audios = map(os.path.abspath, audios)
     audios = [*audios]
     if len(audios) == 0:
-        print("No valid file found in %s. Aborting"%FLAGS.input_path)
+        print("No valid file found in %s. Aborting" % input_paths)
 
     if not FLAGS.lazy:
 
@@ -275,7 +278,7 @@ def main(argv):
         pbar.close()
 
     with open(os.path.join(
-            FLAGS.output_path,
+            output_path,
             'metadata.yaml',
     ), 'w') as metadata:
         yaml.safe_dump({'lazy': FLAGS.lazy, 'channels': FLAGS.channels, 'n_seconds': n_seconds, 'sr': FLAGS.sampling_rate}, metadata)
